@@ -1,0 +1,11 @@
+﻿playwright
+faiss-cpu
+sentence-transformers
+transformers
+torch
+pydantic
+pytest
+pyyaml
+wandb
+vllm
+openai

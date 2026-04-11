@@ -1,0 +1,28 @@
+llm:
+  provider: deepseek
+  base_url: https://api.deepseek.com
+
+llm_planner:
+  provider: anthropic
+  model: claude-haiku-4-5-20251001
+
+env:
+  type: real
+  search_api_key: ${SERPAPI_KEY}
+  search_engine: serp
+  headless: true
+  request_delay: 1.0
+
+agent:
+  model: deepseek-chat
+  planner_model: claude-haiku-4-5-20251001
+  decision_model: deepseek-chat
+  max_steps: 15
+  max_sub_goals: 6
+
+reward:
+  sub_goal_weight: 0.2
+  answer_weight: 1.0
+  citation_weight: 0.3
+  step_penalty: 0.01
+  expected_citations: 3

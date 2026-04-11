@@ -1,0 +1,29 @@
+llm:
+  provider: deepseek
+  base_url: https://api.deepseek.com
+
+llm_planner:
+  provider: deepseek
+  base_url: https://api.deepseek.com
+  model: deepseek-chat
+
+env:
+  type: real
+  search_api_key: ${SERPAPI_KEY}
+  search_engine: serp
+  headless: true
+  request_delay: 1.5
+
+agent:
+  model: deepseek-reasoner
+  planner_model: deepseek-chat
+  decision_model: deepseek-reasoner
+  max_steps: 10
+  max_sub_goals: 5
+
+reward:
+  sub_goal_weight: 0.2
+  answer_weight: 1.0
+  citation_weight: 0.3
+  step_penalty: 0.01
+  expected_citations: 3

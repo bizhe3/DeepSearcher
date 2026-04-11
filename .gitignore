@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+.golden_eval_tmp/
+data/memory_e2e.jsonl
+data/.golden_eval_tmp/
+results/
+*.tmp
+.DS_Store
