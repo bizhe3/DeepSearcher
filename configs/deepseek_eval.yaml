@@ -7,12 +7,19 @@ env:
   search_api_key: ${SERPAPI_KEY}
   search_engine: serp
   headless: true
-  request_delay: 1.0
+  request_delay: 2.0
 
 agent:
   model: deepseek-chat
   max_steps: 15
   max_sub_goals: 6
+
+auditor:
+  enabled: true
+  model: deepseek-chat
+  replan_cooldown_steps: 3
+  max_global_replans: 4
+  max_redo_per_subgoal: 1
 
 reward:
   sub_goal_weight: 0.2

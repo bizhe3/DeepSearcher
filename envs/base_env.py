@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from deepresearch.agent.types import (
     AgentAction,
@@ -70,7 +71,28 @@ class BaseEnv(ABC):
             elif action.action_type == "cross_check":
                 query = str(action.params["query"])
                 top_k = int(action.params.get("top_k", 5))
-                cross_check_results = await self.search(query=query, top_k=top_k)
+                exclude_domains = set(action.params.get("exclude_domains", []))
+                # Request extra results to have room after filtering
+                fetch_count = top_k * 3 if exclude_domains else top_k
+                raw_results = await self.search(query=query, top_k=fetch_count)
+                if exclude_domains and raw_results:
+                    # Filter out results from already-seen domains
+                    filtered = [
+                        r for r in raw_results
+                        if urlparse(r.url).netloc not in exclude_domains
+                    ]
+                    # Re-rank filtered results
+                    for rank, r in enumerate(filtered, 1):
+                        r.rank = rank
+                    cross_check_results = filtered[:top_k]
+                    # If too few new sources, backfill with seen domains
+                    if len(cross_check_results) < top_k:
+                        remaining = [r for r in raw_results if r not in cross_check_results]
+                        for r in remaining[:top_k - len(cross_check_results)]:
+                            r.rank = len(cross_check_results) + 1
+                            cross_check_results.append(r)
+                else:
+                    cross_check_results = raw_results[:top_k]
                 result = cross_check_results if cross_check_results else "No cross-check results."
             elif action.action_type == "terminate":
                 result = action.params["answer"]

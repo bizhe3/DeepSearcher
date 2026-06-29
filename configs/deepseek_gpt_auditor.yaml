@@ -1,0 +1,45 @@
+# DeepSeek 主决策 + GPT-4o-mini 独立 Auditor
+# Decision LLM 用 DeepSeek (国内成本最低)
+# Auditor LLM 用 GPT-4o-mini (独立 vendor 防自利偏差，速度快，JSON 稳定)
+#
+# 需要的环境变量:
+#   DEEPSEEK_API_KEY  - 决策与 planner 用
+#   OPENAI_API_KEY    - auditor 用
+
+llm:
+  provider: deepseek
+  base_url: https://api.deepseek.com
+
+# 独立 auditor LLM 配置（被 main.py / eval_e2e.py 读取并创建 judge_client）
+llm_auditor:
+  provider: openai
+  model: gpt-4o-mini
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY
+
+env:
+  type: real
+  search_api_key: ${SERPAPI_KEY}
+  search_engine: serp
+  headless: true
+  request_delay: 2.0
+
+agent:
+  model: deepseek-chat
+  max_steps: 15
+  max_sub_goals: 6
+
+# Auditor 行为参数（不含 LLM 选择，那个在 llm_auditor 里）
+auditor:
+  enabled: true
+  model: gpt-4o-mini              # 与 llm_auditor.model 保持一致
+  replan_cooldown_steps: 3
+  max_global_replans: 4
+  max_redo_per_subgoal: 1
+
+reward:
+  sub_goal_weight: 0.2
+  answer_weight: 1.0
+  citation_weight: 0.3
+  step_penalty: 0.01
+  expected_citations: 3

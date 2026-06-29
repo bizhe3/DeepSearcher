@@ -33,6 +33,54 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _build_optional_client(cfg_section: Dict[str, Any]) -> Any:
+    """Build an LLM client from a YAML config section, or return None if empty.
+
+    Used for optional 'llm_planner' and 'llm_auditor' sections so that decision /
+    planner / auditor can each use a different vendor (preventing self-bias).
+
+    Recognized providers: 'anthropic', 'deepseek', 'openai' (which also covers
+    Qwen / Moonshot / any OpenAI-compatible API via base_url).
+    """
+    if not cfg_section:
+        return None
+
+    provider = str(cfg_section.get("provider", "anthropic")).lower()
+    model = str(cfg_section.get("model", ""))
+    api_key_env = str(cfg_section.get("api_key_env", "")).strip()
+
+    if provider == "anthropic":
+        env_var = api_key_env or "ANTHROPIC_API_KEY"
+        api_key = os.environ.get(env_var, "").strip()
+        if not api_key:
+            raise ValueError(f"{env_var} is not set (required for {model or 'anthropic'}).")
+        return AnthropicClient(api_key=api_key, model=model or "claude-haiku-4-5-20251001")
+
+    # All non-anthropic providers go through OpenAI-compatible client (DeepSeek, OpenAI, Qwen, etc.)
+    if provider == "deepseek":
+        env_var = api_key_env or "DEEPSEEK_API_KEY"
+        default_base = "https://api.deepseek.com"
+    elif provider == "openai":
+        env_var = api_key_env or "OPENAI_API_KEY"
+        default_base = "https://api.openai.com/v1"
+    else:
+        # Custom / unknown provider — must specify api_key_env explicitly
+        if not api_key_env:
+            raise ValueError(f"provider='{provider}' requires explicit api_key_env in YAML.")
+        env_var = api_key_env
+        default_base = ""
+
+    api_key = os.environ.get(env_var, "").strip()
+    if not api_key:
+        raise ValueError(f"{env_var} is not set (required for provider='{provider}').")
+
+    base_url = str(cfg_section.get("base_url", default_base))
+    if not base_url:
+        raise ValueError(f"base_url required for provider='{provider}'.")
+
+    return OpenAICompatibleClient(api_key=api_key, model=model, base_url=base_url)
+
+
 def _resolve_env_placeholders(value: Any) -> Any:
     """Recursively resolve ${ENV_VAR} placeholders in config values."""
     if isinstance(value, dict):
@@ -111,24 +159,8 @@ async def async_main() -> int:
             raise ValueError("ANTHROPIC_API_KEY is not set.")
         llm_client = AnthropicClient(api_key=api_key, model=model)
 
-    planner_client = None
-    planner_llm_cfg = config.get("llm_planner", {})
-    if planner_llm_cfg:
-        planner_provider = str(planner_llm_cfg.get("provider", "anthropic")).lower()
-        planner_model_name = str(planner_llm_cfg.get("model", "claude-haiku-4-5-20251001"))
-        if planner_provider == "deepseek":
-            planner_api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-            if not planner_api_key:
-                raise ValueError("DEEPSEEK_API_KEY is not set for planner.")
-            planner_base_url = str(planner_llm_cfg.get("base_url", "https://api.deepseek.com"))
-            planner_client = OpenAICompatibleClient(
-                api_key=planner_api_key, model=planner_model_name, base_url=planner_base_url
-            )
-        else:
-            planner_api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-            if not planner_api_key:
-                raise ValueError("ANTHROPIC_API_KEY is not set for planner.")
-            planner_client = AnthropicClient(api_key=planner_api_key, model=planner_model_name)
+    planner_client = _build_optional_client(config.get("llm_planner", {}))
+    auditor_client = _build_optional_client(config.get("llm_auditor", {}))
 
     def _print_progress(event: dict) -> None:
         status = "ok" if event["success"] else f"err:{event['error']}"
@@ -137,7 +169,11 @@ async def async_main() -> int:
             f"| {event['goal'][:60]}"
         )
 
-    agent = build_agent_from_config(config, llm_client, planner_client=planner_client)
+    agent = build_agent_from_config(
+        config, llm_client,
+        planner_client=planner_client,
+        judge_client=auditor_client,
+    )
     # Use planner_client for judging if available — the judge prompt is straightforward
     # and doesn't benefit from R1-style reasoning; using R1 risks truncation mid-JSON.
     judge_client = planner_client if planner_client is not None else llm_client

@@ -1,0 +1,44 @@
+# DeepSeek 主决策 + 通义千问 独立 Auditor
+# Decision LLM 用 DeepSeek
+# Auditor LLM 用 Qwen-Turbo (国内独立 vendor, 不需要代理, 价格极低)
+#
+# 需要的环境变量:
+#   DEEPSEEK_API_KEY  - 决策与 planner 用
+#   DASHSCOPE_API_KEY - auditor 用 (阿里云 DashScope 平台 key)
+
+llm:
+  provider: deepseek
+  base_url: https://api.deepseek.com
+
+# 独立 auditor LLM 配置
+llm_auditor:
+  provider: openai                                                    # qwen 兼容 openai 协议
+  model: qwen-turbo
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key_env: DASHSCOPE_API_KEY
+
+env:
+  type: real
+  search_api_key: ${SERPAPI_KEY}
+  search_engine: serp
+  headless: true
+  request_delay: 2.0
+
+agent:
+  model: deepseek-chat
+  max_steps: 15
+  max_sub_goals: 6
+
+auditor:
+  enabled: true
+  model: qwen-turbo
+  replan_cooldown_steps: 3
+  max_global_replans: 4
+  max_redo_per_subgoal: 1
+
+reward:
+  sub_goal_weight: 0.2
+  answer_weight: 1.0
+  citation_weight: 0.3
+  step_penalty: 0.01
+  expected_citations: 3

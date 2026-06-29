@@ -32,6 +32,18 @@ class PageContent(BaseModel):
     total_pages: Optional[int]
 
 
+class QualityVerdict(BaseModel):
+    """LLM-as-Auditor multi-dimensional quality tag for a sub-goal."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    answer_clarity: Literal["clear", "vague", "missing"]
+    source_credibility: Literal["multi_source", "single_source", "no_source"]
+    is_quantitative: bool
+    next_action_hint: Literal["proceed", "verify", "redo"]
+    rationale: str = ""
+
+
 class SubGoal(BaseModel):
     """Tracks progress for an intermediate research sub-goal."""
 
@@ -42,6 +54,8 @@ class SubGoal(BaseModel):
     status: Literal["pending", "active", "completed", "failed"]
     completed_at_step: Optional[int]
     summary: Optional[str] = None
+    quality_tag: Optional[QualityVerdict] = None
+    redo_count: int = 0
 
 
 class AgentAction(BaseModel):

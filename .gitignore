@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+.env.local
 *.egg-info/
 dist/
 build/
@@ -11,3 +12,20 @@ data/.golden_eval_tmp/
 results/
 *.tmp
 .DS_Store
+
+# 私有评测数据(用户指定排除)
+data/corpus/
+data/questions/
+data/golden_set.jsonl
+data/memory_eval_pairs.jsonl
+# 保留 _public 版本可推
+!data/golden_set_public.jsonl
+
+# LTM session 数据
+data/memory_e2e/
+*.md.bak
+
+# IDE
+.vscode/
+.idea/
+.claude/

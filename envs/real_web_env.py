@@ -91,17 +91,41 @@ class RealWebEnv(BaseEnv):
         raise last_error
 
     _SKIP_EXTENSIONS = {
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
         ".zip", ".rar", ".gz", ".tar", ".exe", ".dmg",
     }
+    # PDFs handled separately via _fetch_pdf (text extraction, no browser).
+    _PDF_EXTENSIONS = {".pdf"}
 
     async def fetch_page(self, url: str) -> PageContent:
-        """Open a URL in Playwright, extract readable text, and detect pagination."""
+        """Open a URL in Playwright, extract readable text, and detect pagination.
+
+        PDF and arXiv PDF URLs are routed to specialized handlers:
+        - arXiv /pdf/ URLs auto-rewrite to /abs/ HTML page (faster + has metadata)
+        - other PDFs go through pypdf text extraction
+        """
         from urllib.parse import urlparse
-        parsed_path = urlparse(url).path.lower()
+        parsed = urlparse(url)
+        parsed_path = parsed.path.lower()
+
         if any(parsed_path.endswith(ext) for ext in self._SKIP_EXTENSIONS):
             raise ValueError(f"Skipping non-HTML resource: {url}")
 
+        # arXiv PDF → redirect to abs page (HTML, has title/abstract/links)
+        if parsed.netloc.endswith("arxiv.org") and "/pdf/" in parsed_path:
+            abs_url = url.replace("/pdf/", "/abs/")
+            if abs_url.endswith(".pdf"):
+                abs_url = abs_url[:-4]
+            return await self._fetch_html_page(abs_url)
+
+        # Other PDFs → pypdf text extraction
+        if any(parsed_path.endswith(ext) for ext in self._PDF_EXTENSIONS):
+            return await self._fetch_pdf(url)
+
+        return await self._fetch_html_page(url)
+
+    async def _fetch_html_page(self, url: str) -> PageContent:
+        """Fetch an HTML page via Playwright + Readability.js (the original path)."""
         await self._ensure_browser()
         await self._apply_fetch_rate_limit()
 
@@ -167,6 +191,57 @@ class RealWebEnv(BaseEnv):
             is_paginated=is_paginated,
             current_page=current_page,
             total_pages=None,
+        )
+
+    async def _fetch_pdf(self, url: str) -> PageContent:
+        """Download a PDF and extract text via pypdf. Body has page markers."""
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:
+            raise ValueError(
+                f"PDF extraction requires the 'pypdf' package. URL: {url}"
+            ) from exc
+
+        await self._apply_fetch_rate_limit()
+
+        def _download_and_extract() -> Tuple[str, str, int]:
+            request = Request(url=url, headers={"User-Agent": "Mozilla/5.0 DeepResearch"})
+            with urlopen(request, timeout=30) as response:
+                data = response.read()
+            import io
+            reader = PdfReader(io.BytesIO(data))
+            metadata = reader.metadata or {}
+            title = ""
+            try:
+                title = str(metadata.get("/Title") or "").strip()
+            except Exception:
+                title = ""
+            pages_text: List[str] = []
+            for i, page in enumerate(reader.pages, start=1):
+                try:
+                    text = (page.extract_text() or "").strip()
+                except Exception:
+                    text = ""
+                if text:
+                    pages_text.append(f"[Page {i}]\n{text}")
+            return title, "\n\n".join(pages_text), len(reader.pages)
+
+        try:
+            title, body, total_pages = await asyncio.to_thread(_download_and_extract)
+        except Exception as exc:
+            raise ValueError(f"Failed to extract PDF text from {url}: {exc}") from exc
+
+        if not body:
+            raise ValueError(f"PDF appears to contain no extractable text: {url}")
+
+        return PageContent(
+            url=url,
+            title=title or url,
+            body=body,
+            links=[],
+            is_paginated=False,
+            current_page=1,
+            total_pages=total_pages,
         )
 
     async def click_link(self, page: PageContent, link_url: str) -> PageContent:

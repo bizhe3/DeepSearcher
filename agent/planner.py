@@ -97,8 +97,14 @@ class SubGoalDecomposer:
         task: str,
         completed: List[SubGoal],
         new_info: str,
+        quality_signals: Optional[str] = None,
     ) -> List[SubGoal]:
-        """Generate updated pending sub-goals based on completed work and new evidence."""
+        """Generate updated pending sub-goals based on completed work and new evidence.
+
+        quality_signals (optional) carries auditor verdicts for already-tagged
+        sub-goals so the planner can adjust direction (e.g., add cross-check
+        sub-goals when prior findings were vague or single-source).
+        """
         completed_payload = [
             {
                 "id": sub_goal.id,
@@ -108,6 +114,16 @@ class SubGoalDecomposer:
             for sub_goal in completed
         ]
 
+        quality_section = ""
+        if quality_signals:
+            quality_section = (
+                f"\n\nQuality signals from prior sub-goals (auditor tags):\n"
+                f"{quality_signals}\n\n"
+                "Use these signals to adjust planning: prefer adding cross-check "
+                "sub-goals after single-source quantitative findings, and avoid "
+                "regenerating sub-goals that already failed."
+            )
+
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": DECOMPOSE_SYSTEM_PROMPT},
             {
@@ -116,14 +132,24 @@ class SubGoalDecomposer:
                     "Replan the remaining research steps.\n\n"
                     f"Task:\n{task}\n\n"
                     f"Completed sub-goals:\n{json.dumps(completed_payload, ensure_ascii=False)}\n\n"
-                    f"New information:\n{new_info}\n\n"
+                    f"New information:\n{new_info}"
+                    f"{quality_section}\n\n"
                     "Return ONLY the remaining new or updated sub-goals as a JSON array."
                 ),
             },
         ]
 
         raw_response = await self._chat_completion(messages, response_format="json")
-        replanned = self._parse_sub_goals(raw_response)
+        try:
+            # Replan accepts 0+ new goals; failing to parse should not crash
+            # the whole task — caller can keep the existing plan.
+            replanned = self._parse_sub_goals(raw_response, min_goals=0)
+        except (ValueError, json.JSONDecodeError) as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "replan parse failed (%s) — keeping current sub_goals", exc
+            )
+            return []
 
         completed_ids = {sub_goal.id for sub_goal in completed}
         completed_descriptions = {
@@ -167,8 +193,13 @@ class SubGoalDecomposer:
 
         return text
 
-    def _parse_sub_goals(self, raw_text: str) -> List[SubGoal]:
-        """Parse model output into pending SubGoal objects."""
+    def _parse_sub_goals(self, raw_text: str, min_goals: int = 2) -> List[SubGoal]:
+        """Parse model output into pending SubGoal objects.
+
+        min_goals: minimum count to enforce. decompose() uses 2 (need a real
+        plan); replan() uses 0 (replan may legitimately produce 0-1 new goals
+        when most work is already complete).
+        """
         parsed_payload = json.loads(self._extract_json_array(raw_text))
         if not isinstance(parsed_payload, list):
             raise ValueError("Sub-goal output must be a JSON array.")
@@ -192,8 +223,8 @@ class SubGoalDecomposer:
                 )
             )
 
-        if len(sub_goals) < 2:
-            raise ValueError("LLM returned fewer than 2 sub-goals.")
+        if len(sub_goals) < min_goals:
+            raise ValueError(f"LLM returned fewer than {min_goals} sub-goals.")
 
         return sub_goals
 
